@@ -1,0 +1,6 @@
+# Data directory for encrypted logs
+# This folder is created automatically
+*.db
+*.json
+.key
+*.log
