@@ -1060,12 +1060,15 @@ class KeystroGUI:
             ConsentManagerTool()
         ]
         
-        # Show agreement first
+        # Setup UI first (but keep window hidden)
+        self.root.withdraw()
+        self.setup_ui()
+        
+        # Show agreement
+        self.root.deiconify()  # Show window now
         if not self.show_agreement():
             self.root.destroy()
             sys.exit(0)
-        
-        self.setup_ui()
         
     def show_agreement(self):
         """Show educational use agreement"""
