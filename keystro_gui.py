@@ -283,16 +283,35 @@ class KeystroTool:
         
     def launch(self, parent):
         """Launch the tool window"""
-        if self.window and tk.Toplevel.winfo_exists(self.window):
-            self.window.lift()
-            return
+        # Check if window exists and is still valid
+        if self.window is not None:
+            try:
+                if self.window.winfo_exists():
+                    self.window.lift()
+                    self.window.focus_force()
+                    return
+            except:
+                self.window = None
         
+        # Create new window
         self.window = tk.Toplevel(parent)
         self.window.title(f"{self.icon} {self.name}")
         self.window.geometry("900x650")
         self.window.configure(bg='#1a1a1a')
         
+        # Prevent window from closing with main window
+        self.window.transient()
+        
+        # Set protocol for window close
+        self.window.protocol("WM_DELETE_WINDOW", self.on_close)
+        
         self.setup_ui()
+    
+    def on_close(self):
+        """Handle window close"""
+        if self.window:
+            self.window.destroy()
+            self.window = None
     
     def setup_ui(self):
         """Override in subclass"""
@@ -375,7 +394,7 @@ class SessionViewerTool(KeystroTool):
         self.load_sessions()
         
     def load_sessions(self):
-        """Load and display sessions"""
+        """Load and display sessions with WPM/CPM calculations"""
         self.session_text.delete('1.0', tk.END)
         
         logs = self.storage.get_logs()
@@ -388,11 +407,51 @@ class SessionViewerTool(KeystroTool):
         output += f"  KEYSTROKE SESSIONS - {len(logs)} entries\n"
         output += "═══════════════════════════════════════════════════════════\n\n"
         
+        # Calculate overall statistics
+        total_duration = sum(log.get('duration', 0) for log in logs)
+        total_chars = sum(len(log.get('window_title', '').replace('Typed: ', '')) for log in logs)
+        
+        if total_duration > 0:
+            cpm = int((total_chars / total_duration) * 60) if total_duration > 0 else 0
+            wpm = int(cpm / 5)  # Average word length is 5 characters
+            
+            output += "📊 TYPING STATISTICS:\n"
+            output += f"   Total Characters: {total_chars}\n"
+            output += f"   Total Duration: {total_duration}s ({total_duration/60:.1f} min)\n"
+            output += f"   ⚡ Speed: {wpm} WPM ({cpm} CPM)\n"
+            output += f"   Average Session: {total_duration/len(logs):.1f}s\n\n"
+            output += "─" * 60 + "\n\n"
+        
+        # Detect patterns and errors
+        backspace_count = sum(log.get('window_title', '').count('[BACKSPACE]') for log in logs)
+        delete_count = sum(log.get('window_title', '').count('[DELETE]') for log in logs)
+        error_rate = ((backspace_count + delete_count) / max(total_chars, 1)) * 100
+        
+        if backspace_count > 0 or delete_count > 0:
+            output += "⚠️ ERROR ANALYSIS:\n"
+            output += f"   Backspaces: {backspace_count}\n"
+            output += f"   Deletes: {delete_count}\n"
+            output += f"   Error Rate: {error_rate:.2f}%\n"
+            output += f"   Accuracy: {100-error_rate:.2f}%\n\n"
+            output += "─" * 60 + "\n\n"
+        
+        output += "📝 SESSION DETAILS:\n\n"
+        
         for i, log in enumerate(logs, 1):
-            output += f"[{i}] {log.get('timestamp', 'N/A')}\n"
-            output += f"    App: {log.get('app_name', 'N/A')}\n"
-            output += f"    Window: {log.get('window_title', 'N/A')}\n"
-            output += f"    Duration: {log.get('duration', 0)}s\n"
+            timestamp = log.get('timestamp', 'N/A')
+            app = log.get('app_name', 'N/A')
+            window = log.get('window_title', 'N/A')
+            duration = log.get('duration', 0)
+            
+            # Calculate per-session WPM/CPM
+            chars_typed = len(window.replace('Typed: ', ''))
+            session_cpm = int((chars_typed / duration) * 60) if duration > 0 else 0
+            session_wpm = int(session_cpm / 5)
+            
+            output += f"[{i}] {timestamp}\n"
+            output += f"    App: {app}\n"
+            output += f"    Window: {window[:60]}{'...' if len(window) > 60 else ''}\n"
+            output += f"    Duration: {duration}s | Speed: {session_wpm} WPM ({session_cpm} CPM)\n"
             output += "\n"
         
         self.session_text.insert('1.0', output)
@@ -803,6 +862,180 @@ class ConsentManagerTool(KeystroTool):
             self.load_consent_status()
 
 
+class ExportTool(KeystroTool):
+    """Export data to JSON/TXT formats"""
+    
+    def __init__(self):
+        super().__init__(
+            "Data Exporter",
+            "Export sessions to JSON or TXT files",
+            "💾"
+        )
+        self.storage = SecureStorage()
+        
+    def setup_ui(self):
+        # Header
+        header = tk.Label(
+            self.window,
+            text=f"{self.icon} {self.name}",
+            font=("Arial", 18, "bold"),
+            bg='#1a1a1a',
+            fg='#00ff00'
+        )
+        header.pack(pady=15)
+        
+        # Info label
+        info_label = tk.Label(
+            self.window,
+            text="Export your keystroke session data to JSON or TXT format",
+            font=("Arial", 11),
+            bg='#1a1a1a',
+            fg='#aaaaaa'
+        )
+        info_label.pack(pady=5)
+        
+        # Stats frame
+        stats_frame = tk.Frame(self.window, bg='#2a2a2a', relief='solid', borderwidth=2)
+        stats_frame.pack(fill='x', padx=20, pady=15)
+        
+        logs = self.storage.get_logs()
+        stats_label = tk.Label(
+            stats_frame,
+            text=f"Total Sessions Available: {len(logs)}",
+            font=("Arial", 12, "bold"),
+            bg='#2a2a2a',
+            fg='#00ff00'
+        )
+        stats_label.pack(pady=15)
+        
+        # Export options frame
+        options_frame = tk.Frame(self.window, bg='#1a1a1a')
+        options_frame.pack(pady=20)
+        
+        # JSON Export button
+        json_btn = tk.Button(
+            options_frame,
+            text="📄 Export to JSON",
+            font=("Arial", 13, "bold"),
+            bg='#0066cc',
+            fg='white',
+            activebackground='#0052a3',
+            activeforeground='white',
+            command=self.export_json,
+            relief='raised',
+            borderwidth=3,
+            padx=30,
+            pady=15,
+            width=20
+        )
+        json_btn.pack(pady=10)
+        
+        # TXT Export button
+        txt_btn = tk.Button(
+            options_frame,
+            text="📝 Export to TXT",
+            font=("Arial", 13, "bold"),
+            bg='#00aa00',
+            fg='white',
+            activebackground='#008800',
+            activeforeground='white',
+            command=self.export_txt,
+            relief='raised',
+            borderwidth=3,
+            padx=30,
+            pady=15,
+            width=20
+        )
+        txt_btn.pack(pady=10)
+        
+        # Preview frame
+        preview_label = tk.Label(
+            self.window,
+            text="Export Preview:",
+            font=("Arial", 11, "bold"),
+            bg='#1a1a1a',
+            fg='white'
+        )
+        preview_label.pack(pady=(20, 5))
+        
+        preview_frame = tk.Frame(self.window, bg='#1a1a1a')
+        preview_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        
+        self.preview_text = scrolledtext.ScrolledText(
+            preview_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            bg='#0a0a0a',
+            fg='#00ff00',
+            insertbackground='white',
+            relief='solid',
+            borderwidth=2,
+            padx=10,
+            pady=10
+        )
+        self.preview_text.pack(fill='both', expand=True)
+        
+        # Show preview
+        self.show_preview()
+        
+    def show_preview(self):
+        """Show data preview"""
+        logs = self.storage.get_logs()
+        
+        if not logs:
+            self.preview_text.insert('1.0', "No data available to export.")
+            return
+        
+        preview = "=" * 60 + "\n"
+        preview += "EXPORT PREVIEW (First 10 sessions)\n"
+        preview += "=" * 60 + "\n\n"
+        
+        for i, log in enumerate(logs[:10], 1):
+            preview += f"[{i}] {log.get('timestamp', 'N/A')}\n"
+            preview += f"    App: {log.get('app_name', 'N/A')}\n"
+            preview += f"    Window: {log.get('window_title', 'N/A')[:50]}...\n"
+            preview += f"    Duration: {log.get('duration', 0)}s\n\n"
+        
+        if len(logs) > 10:
+            preview += f"\n... and {len(logs) - 10} more sessions\n"
+        
+        self.preview_text.insert('1.0', preview)
+    
+    def export_json(self):
+        """Export to JSON"""
+        from tkinter import filedialog
+        
+        filename = filedialog.asksaveasfilename(
+            title="Save as JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=f"keystro_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        )
+        
+        if filename:
+            if self.storage.export_to_json(filename):
+                messagebox.showinfo("Success", f"Data exported successfully to:\n{filename}")
+            else:
+                messagebox.showerror("Error", "Failed to export data to JSON.")
+    
+    def export_txt(self):
+        """Export to TXT"""
+        from tkinter import filedialog
+        
+        filename = filedialog.asksaveasfilename(
+            title="Save as TXT",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialfile=f"keystro_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        )
+        
+        if filename:
+            if self.storage.export_to_txt(filename):
+                messagebox.showinfo("Success", f"Data exported successfully to:\n{filename}")
+            else:
+                messagebox.showerror("Error", "Failed to export data to TXT.")
+
+
 class KeystroGUI:
     """Main KEYSTRO GUI Application"""
     
@@ -823,6 +1056,7 @@ class KeystroGUI:
             SessionViewerTool(),
             ThreatAnalyzerTool(),
             StatisticsTool(),
+            ExportTool(),
             ConsentManagerTool()
         ]
         
@@ -918,9 +1152,10 @@ class KeystroGUI:
             tool_card = self.create_tool_card(tools_frame, tool)
             tool_card.grid(row=row, column=col, padx=15, pady=15, sticky='nsew')
         
-        # Configure grid weights
-        for i in range(2):
+        # Configure grid weights (now 3 rows for 5 tools)
+        for i in range(3):
             tools_frame.grid_rowconfigure(i, weight=1)
+        for i in range(2):
             tools_frame.grid_columnconfigure(i, weight=1)
         
         # Footer

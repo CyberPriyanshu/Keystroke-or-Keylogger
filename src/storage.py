@@ -180,6 +180,39 @@ class SecureStorage:
             'period_days': days
         }
     
+    def export_to_json(self, output_file: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> bool:
+        """Export logs to JSON file"""
+        try:
+            logs = self.get_logs(start_date, end_date)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(logs, f, indent=2, default=str)
+            return True
+        except Exception as e:
+            print(f"Error exporting to JSON: {e}")
+            return False
+    
+    def export_to_txt(self, output_file: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> bool:
+        """Export logs to TXT file"""
+        try:
+            logs = self.get_logs(start_date, end_date)
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write("=" * 70 + "\n")
+                f.write("KEYSTRO - Activity Log Export\n")
+                f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Total Entries: {len(logs)}\n")
+                f.write("=" * 70 + "\n\n")
+                
+                for i, log in enumerate(logs, 1):
+                    f.write(f"[{i}] {log.get('timestamp', 'N/A')}\n")
+                    f.write(f"    App: {log.get('app_name', 'N/A')}\n")
+                    f.write(f"    Window: {log.get('window_title', 'N/A')}\n")
+                    f.write(f"    Duration: {log.get('duration', 0)}s\n")
+                    f.write("\n")
+            return True
+        except Exception as e:
+            print(f"Error exporting to TXT: {e}")
+            return False
+    
     def delete_all_logs(self) -> bool:
         """Securely delete all stored logs"""
         try:
