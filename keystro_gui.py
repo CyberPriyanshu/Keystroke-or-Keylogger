@@ -9,6 +9,8 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+import threading
+from pynput import keyboard
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
@@ -316,6 +318,247 @@ class KeystroTool:
     def setup_ui(self):
         """Override in subclass"""
         pass
+
+
+class LiveRecorderTool(KeystroTool):
+    """Live keystroke recording tool - works like terminal"""
+    
+    def __init__(self):
+        super().__init__(
+            "Live Recorder",
+            "Record keystrokes in real-time (like terminal)",
+            "🔴"
+        )
+        self.storage = SecureStorage()
+        self.is_recording = False
+        self.listener = None
+        self.threat_keywords = ['password', 'passwd', 'pwd', 'credit', 'card', 'ssn', 'bank', 'login']
+        
+    def setup_ui(self):
+        # Header
+        header = tk.Label(
+            self.window,
+            text=f"{self.icon} {self.name}",
+            font=("Arial", 18, "bold"),
+            bg='#1a1a1a',
+            fg='#ff3333'
+        )
+        header.pack(pady=15)
+        
+        # Status frame
+        self.status_frame = tk.Frame(self.window, bg='#2a2a2a', relief='solid', borderwidth=3)
+        self.status_frame.pack(fill='x', padx=20, pady=10)
+        
+        self.status_label = tk.Label(
+            self.status_frame,
+            text="⚪ READY - Press START to begin recording",
+            font=("Arial", 12, "bold"),
+            bg='#2a2a2a',
+            fg='#ffaa00'
+        )
+        self.status_label.pack(pady=12)
+        
+        # Control buttons
+        control_frame = tk.Frame(self.window, bg='#1a1a1a')
+        control_frame.pack(pady=15)
+        
+        self.start_btn = tk.Button(
+            control_frame,
+            text="🔴 START RECORDING",
+            font=("Arial", 13, "bold"),
+            bg='#00cc00',
+            fg='white',
+            activebackground='#00aa00',
+            activeforeground='white',
+            command=self.start_recording,
+            relief='raised',
+            borderwidth=3,
+            padx=25,
+            pady=12,
+            width=20
+        )
+        self.start_btn.pack(side='left', padx=10)
+        
+        self.stop_btn = tk.Button(
+            control_frame,
+            text="⏹️ STOP RECORDING",
+            font=("Arial", 13, "bold"),
+            bg='#555555',
+            fg='#888888',
+            command=self.stop_recording,
+            relief='raised',
+            borderwidth=3,
+            padx=25,
+            pady=12,
+            width=20,
+            state='disabled'
+        )
+        self.stop_btn.pack(side='left', padx=10)
+        
+        # Live display area
+        display_label = tk.Label(
+            self.window,
+            text="Live Keystroke Feed:",
+            font=("Arial", 11, "bold"),
+            bg='#1a1a1a',
+            fg='white'
+        )
+        display_label.pack(pady=(20, 5))
+        
+        display_frame = tk.Frame(self.window, bg='#1a1a1a')
+        display_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        
+        self.live_text = scrolledtext.ScrolledText(
+            display_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 11),
+            bg='#0a0a0a',
+            fg='#00ff00',
+            insertbackground='white',
+            relief='solid',
+            borderwidth=2,
+            padx=10,
+            pady=10,
+            state='disabled'
+        )
+        self.live_text.pack(fill='both', expand=True)
+        
+        # Configure text tags for colors
+        self.live_text.tag_config('normal', foreground='#00ff00')
+        self.live_text.tag_config('threat', foreground='#ff3333', background='#330000')
+        self.live_text.tag_config('timestamp', foreground='#00ffff')
+        
+        # Instructions
+        instructions = """
+╔═══════════════════════════════════════════════════════════╗
+║               LIVE RECORDING INSTRUCTIONS                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+1. Click "START RECORDING" button above
+2. Type anything on your keyboard (anywhere on your computer)
+3. Keystrokes will appear here in REAL-TIME
+4. Threat detection is automatic (passwords, credit cards, etc.)
+5. Click "STOP RECORDING" when done
+
+⚠️ WARNING: This captures ALL keystrokes globally!
+         Only use on YOUR OWN device with proper consent.
+"""
+        self.live_text.config(state='normal')
+        self.live_text.insert('1.0', instructions)
+        self.live_text.config(state='disabled')
+    
+    def start_recording(self):
+        """Start keystroke recording"""
+        if self.is_recording:
+            return
+        
+        self.is_recording = True
+        
+        # Update UI
+        self.status_label.config(
+            text="🔴 RECORDING - All keystrokes are being captured!",
+            fg='#ff3333'
+        )
+        self.status_frame.config(bg='#330000')
+        self.start_btn.config(state='disabled', bg='#555555', fg='#888888')
+        self.stop_btn.config(state='normal', bg='#cc0000', fg='white', activebackground='#aa0000')
+        
+        # Clear display and show recording message
+        self.live_text.config(state='normal')
+        self.live_text.delete('1.0', tk.END)
+        self.live_text.insert('1.0', "═" * 60 + "\n")
+        self.live_text.insert(tk.END, "LIVE RECORDING STARTED\n", 'threat')
+        self.live_text.insert(tk.END, f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n", 'timestamp')
+        self.live_text.insert(tk.END, "═" * 60 + "\n\n")
+        self.live_text.config(state='disabled')
+        
+        # Start keyboard listener
+        self.listener = keyboard.Listener(on_press=self.on_key_press)
+        self.listener.start()
+    
+    def stop_recording(self):
+        """Stop keystroke recording"""
+        if not self.is_recording:
+            return
+        
+        self.is_recording = False
+        
+        # Stop listener
+        if self.listener:
+            self.listener.stop()
+            self.listener = None
+        
+        # Update UI
+        self.status_label.config(
+            text="⚪ STOPPED - Recording session ended",
+            fg='#ffaa00'
+        )
+        self.status_frame.config(bg='#2a2a2a')
+        self.start_btn.config(state='normal', bg='#00cc00', fg='white', activebackground='#00aa00')
+        self.stop_btn.config(state='disabled', bg='#555555', fg='#888888')
+        
+        # Add stop message
+        self.live_text.config(state='normal')
+        self.live_text.insert(tk.END, "\n" + "═" * 60 + "\n")
+        self.live_text.insert(tk.END, "RECORDING STOPPED\n", 'threat')
+        self.live_text.insert(tk.END, f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n", 'timestamp')
+        self.live_text.insert(tk.END, "═" * 60 + "\n")
+        self.live_text.config(state='disabled')
+        self.live_text.see(tk.END)
+    
+    def on_key_press(self, key):
+        """Handle key press events"""
+        if not self.is_recording:
+            return
+        
+        try:
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            
+            # Get key character
+            try:
+                key_char = key.char
+                if key_char is None:
+                    key_char = f'[{key.name.upper()}]'
+            except AttributeError:
+                key_char = f'[{key.name.upper()}]'
+            
+            # Check for threats
+            is_threat = any(keyword in key_char.lower() for keyword in self.threat_keywords)
+            
+            # Display in GUI (thread-safe)
+            self.window.after(0, self.display_key, timestamp, key_char, is_threat)
+            
+            # Store in database
+            self.storage.store_activity(
+                app_name="Live Recorder",
+                window_title=f"Key: {key_char}",
+                duration_seconds=1
+            )
+            
+        except Exception as e:
+            print(f"Error processing key: {e}")
+    
+    def display_key(self, timestamp, key_char, is_threat):
+        """Display key in the text widget"""
+        self.live_text.config(state='normal')
+        
+        # Show timestamp
+        self.live_text.insert(tk.END, f"[{timestamp}] ", 'timestamp')
+        
+        # Show key
+        if is_threat:
+            self.live_text.insert(tk.END, f"Key: {key_char} ⚠️ THREAT!\n", 'threat')
+        else:
+            self.live_text.insert(tk.END, f"Key: {key_char}\n", 'normal')
+        
+        self.live_text.config(state='disabled')
+        self.live_text.see(tk.END)
+    
+    def on_close(self):
+        """Handle window close - stop recording first"""
+        if self.is_recording:
+            self.stop_recording()
+        super().on_close()
 
 
 class SessionViewerTool(KeystroTool):
@@ -1053,6 +1296,7 @@ class KeystroGUI:
         
         # Initialize tools
         self.tools = [
+            LiveRecorderTool(),
             SessionViewerTool(),
             ThreatAnalyzerTool(),
             StatisticsTool(),
@@ -1155,7 +1399,7 @@ class KeystroGUI:
             tool_card = self.create_tool_card(tools_frame, tool)
             tool_card.grid(row=row, column=col, padx=15, pady=15, sticky='nsew')
         
-        # Configure grid weights (now 3 rows for 5 tools)
+        # Configure grid weights (now 3 rows for 6 tools: 2+2+2)
         for i in range(3):
             tools_frame.grid_rowconfigure(i, weight=1)
         for i in range(2):
